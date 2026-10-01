@@ -431,14 +431,17 @@ def generate_mp_pdf_bytes(data, tecnico_nome, logo_path, firma_path):
 
 
 # ==========================================
-# 3. INTERFACCIA WEB AUTOMATICA TOTALMENTE
+# 3. INTERFACCIA WEB AGGIORNATA E STABILE
 # ==========================================
 st.title("⚡ Gestionale Cloud - SEAB (Modalità Automatica)")
-st.markdown("Database, logo e firma vengono caricati automaticamente dal server. Cerca il dispositivo e scarica i PDF.")
+st.markdown("Database, logo e firma vengono caricati automaticamente dal server. Cerca i dispositivi e scarica i certificati.")
 
 st.sidebar.header("⚙️ Impostazioni")
 tipo_scheda_scelto = st.sidebar.selectbox("Seleziona Tipo di Scheda", ["VSE (Sicurezza Elettrica - IEC 62353)", "MP (Manutenzione Preventiva)"])
-tecnico_input = st.sidebar.text_input("Tecnico Responsabile", value="ALESSANDRO PETRAROLO")
+
+# Menù a tendina blindato per i tecnici censiti SEAB
+TECNICI_AUTORIZZATI = ["ALESSANDRO PETRAROLO", "TECNICO SEAB 2", "TECNICO SEAB 3"]
+tecnico_input = st.sidebar.selectbox("Tecnico Responsabile", TECNICI_AUTORIZZATI)
 
 # Caricamento automatico di logo e firma dalla cartella
 logo_path, firma_path = get_resource_path()
@@ -462,31 +465,51 @@ if "VSE" in tipo_scheda_scelto:
         st.info("Metti il file Excel con questo nome esatto nella stessa cartella di `app.py`.")
         st.stop()
 
-    df = pd.read_excel(excel_filename)
+    # Lettura forzata a stringa e pulizia degli spazi nelle intestazioni
+    df = pd.read_excel(excel_filename, dtype=str)
+    df.columns = [str(c).strip() for c in df.columns]
+    
     st.success(f"Database VSE attivo ({len(df)} dispositivi caricati automaticamente).")
 
-    search_query = st.text_input("🔍 Filtra per Reparto Rilevato o Numero Inventario")
+    # Pannello filtri avanzati
+    st.markdown("### 🔍 Filtri di Ricerca Avanzata")
+    col_f1, col_f2 = st.columns(2)
+    
+    with col_f1:
+        f_reparto = st.text_input("Reparto Rilevato", value="")
+    with col_f2:
+        f_inv = st.text_input("Numero Inventario", value="")
+        
     filtered_df = df.copy()
-    if search_query:
-        def matches_vse(r):
-            q = search_query.lower()
-            val_rep = str(r.get("REPARTO RILEVATO", "")).lower()
-            val_inv = str(r.get("INV ", r.get("INV", ""))).lower()
-            return (q in val_rep) or (q in val_inv)
-        filtered_df = df[df.apply(matches_vse, axis=1)]
+    if f_reparto and "REPARTO RILEVATO" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df['REPARTO RILEVATO'].astype(str).str.lower().str.contains(f_reparto.lower(), na=False)]
+    if f_inv and "INV" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df['INV'].astype(str).str.lower().str.contains(f_inv.lower(), na=False)]
 
     st.write(f"Dispositivi visibili: **{len(filtered_df)}**")
-    st.dataframe(filtered_df[['INV ', 'CLASSE', 'PRODUTTORE', 'MODELLO', 'REPARTO RILEVATO', 'ESITO VE 2026']], use_container_width=True)
+    
+    # Visualizzazione tabella e pulsante di download diretto in Excel
+    st.dataframe(filtered_df, use_container_width=True)
+    
+    excel_buffer = io.BytesIO()
+    filtered_df.to_excel(excel_buffer, index=False)
+    excel_buffer.seek(0)
+    st.download_button(
+        label="📥 Esporta tabella visibile in Excel (.xlsx)",
+        data=excel_buffer,
+        file_name="Tabella_VSE_Filtrata.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     def get_vse_row_dict(row):
         def val(col_name, default=""):
             for c in row.index:
-                if " ".join(str(c).split()).upper() == " ".join(str(col_name).split()).upper():
+                if str(c).strip().upper() == str(col_name).strip().upper():
                     v = row[c]
                     return v if pd.notnull(v) and str(v).lower() != "nan" else default
             return default
 
-        inv_val = val("INV ", val("INV", "0"))
+        inv_val = val("INV", "0")
         if isinstance(inv_val, float): inv_val = int(inv_val)
         data_ve = val("DATA VE 2026", "")
         data_str = data_ve.strftime("%d/%m/%Y") if pd.notnull(data_ve) and hasattr(data_ve, "strftime") else str(data_ve)
@@ -518,26 +541,28 @@ if "VSE" in tipo_scheda_scelto:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📦 Scarica ZIP VSE Filtrati", type="primary"):
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for idx, row in filtered_df.iterrows():
-                    d = get_vse_row_dict(row)
-                    pdf_bytes = generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)
-                    zip_file.writestr(f"Certificato_VSE_{d['inv']}.pdf", pdf_bytes)
-            zip_buffer.seek(0)
-            st.download_button("📥 Scarica file .ZIP VSE", data=zip_buffer, file_name="Certificati_VSE.zip", mime="application/zip")
+            with st.spinner("Generazione dei certificati in corso, attendere..."):
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for idx, row in filtered_df.iterrows():
+                        d = get_vse_row_dict(row)
+                        pdf_bytes = generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)
+                        zip_file.writestr(f"Certificato_VSE_{d['inv']}.pdf", pdf_bytes)
+                zip_buffer.seek(0)
+            st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Certificati_VSE.zip", mime="application/zip")
 
     with col2:
         if PdfMerger is not None and st.button("📚 Genera PDF Cumulativo VSE"):
-            merger = PdfMerger()
-            for idx, row in filtered_df.iterrows():
-                d = get_vse_row_dict(row)
-                merger.append(io.BytesIO(generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)))
-            cum_buffer = io.BytesIO()
-            merger.write(cum_buffer)
-            merger.close()
-            cum_buffer.seek(0)
-            st.download_button("📥 Scarica PDF Cumulativo VSE", data=cum_buffer, file_name="_CUMULATIVO_VSE.pdf", mime="application/pdf")
+            with st.spinner("Unione dei PDF in corso, attendere..."):
+                merger = PdfMerger()
+                for idx, row in filtered_df.iterrows():
+                    d = get_vse_row_dict(row)
+                    merger.append(io.BytesIO(generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)))
+                cum_buffer = io.BytesIO()
+                merger.write(cum_buffer)
+                merger.close()
+                cum_buffer.seek(0)
+            st.download_button("📥 Clicca qui per scaricare il PDF Cumulativo", data=cum_buffer, file_name="_CUMULATIVO_VSE.pdf", mime="application/pdf")
 
 # --- GESTIONE MP AUTOMATICA ---
 else: 
@@ -547,7 +572,7 @@ else:
         st.info("Metti il file Excel con questo nome esatto nella stessa cartella di `app.py`.")
         st.stop()
 
-    df_raw = pd.read_excel(excel_filename, header=None)
+    df_raw = pd.read_excel(excel_filename, header=None, dtype=str)
     row0, row1, row2 = df_raw.iloc[0].values, df_raw.iloc[1].values, df_raw.iloc[2].values
     col_map = {}
     for idx, val in enumerate(row0):
@@ -569,15 +594,22 @@ else:
     st.success(f"Database MP attivo ({len(card_types)} tipi di schede caricate automaticamente).")
     df_data = df_raw.iloc[3:].copy()
 
-    search_query = st.text_input("🔍 Filtra per Reparto Rilevato 2026 o Inventario")
-    if search_query:
-        col_rep, col_inv = col_map.get("REPARTO RILEVATO 2026"), col_map.get("INV")
-        def matches_mp(r):
-            q = search_query.lower()
-            val_rep = str(r.iloc[col_rep]).lower() if col_rep is not None and pd.notnull(r.iloc[col_rep]) else ""
-            val_inv = str(r.iloc[col_inv]).lower() if col_inv is not None and pd.notnull(r.iloc[col_inv]) else ""
-            return (q in val_rep) or (q in val_inv)
-        df_data = df_data[df_data.apply(matches_mp, axis=1)]
+    # Pannello filtri avanzati MP
+    st.markdown("### 🔍 Filtri di Ricerca Avanzata MP")
+    col_mp1, col_mp2 = st.columns(2)
+    with col_mp1:
+        f_rep_mp = st.text_input("Reparto Rilevato 2026", value="")
+    with col_mp2:
+        f_inv_mp = st.text_input("Inventario", value="")
+
+    if f_rep_mp:
+        col_rep = col_map.get("REPARTO RILEVATO 2026")
+        if col_rep is not None:
+            df_data = df_data[df_data.iloc[:, col_rep].astype(str).str.lower().str.contains(f_rep_mp.lower(), na=False)]
+    if f_inv_mp:
+        col_inv = col_map.get("INV")
+        if col_inv is not None:
+            df_data = df_data[df_data.iloc[:, col_inv].astype(str).str.lower().str.contains(f_inv_mp.lower(), na=False)]
 
     st.write(f"Schede MP visibili: **{len(df_data)}**")
 
@@ -621,11 +653,12 @@ else:
 
     st.markdown("### 🚀 Download Schede MP")
     if st.button("📦 Scarica ZIP Schede MP Filtrate", type="primary"):
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for idx, row in df_data.iterrows():
-                d = extract_mp_row_dict(row)
-                pdf_bytes = generate_mp_pdf_bytes(d, tecnico_input, logo_path, firma_path)
-                zip_file.writestr(f"Scheda_MP_{d['n_scheda']}_{d['inv']}.pdf", pdf_bytes)
-        zip_buffer.seek(0)
-        st.download_button("📥 Scarica file .ZIP MP", data=zip_buffer, file_name="Schede_MP_Selezionate.zip", mime="application/zip")
+        with st.spinner("Generazione delle schede MP in corso, attendere..."):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for idx, row in df_data.iterrows():
+                    d = extract_mp_row_dict(row)
+                    pdf_bytes = generate_mp_pdf_bytes(d, tecnico_input, logo_path, firma_path)
+                    zip_file.writestr(f"Scheda_MP_{d['n_scheda']}_{d['inv']}.pdf", pdf_bytes)
+            zip_buffer.seek(0)
+        st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Schede_MP_Selezionate.zip", mime="application/zip")
