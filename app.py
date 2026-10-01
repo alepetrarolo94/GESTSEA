@@ -1,6 +1,7 @@
 import os
 import re
 import io
+import base64
 import zipfile
 import pandas as pd
 import streamlit as st
@@ -17,10 +18,21 @@ except ImportError:
 
 # Configurazione della pagina Streamlit
 st.set_page_config(
-    page_title="Gestionale Cloud - SEAB",
-    page_icon="⚡",
+    page_title="Gestionale Cloud - SEAB Enterprise",
+    page_icon="🏥",
     layout="wide"
 )
+
+# --- STILE CSS FORMALE ED ENTERPRISE ---
+st.markdown("""
+    <style>
+    .stMetric {
+        border-radius: 8px;
+        padding: 10px;
+        border-left: 4px solid #0056b3;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- SISTEMA DI LOGIN SICURO ---
 def check_password():
@@ -39,19 +51,30 @@ def check_password():
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        st.subheader("🔒 Accesso Riservato Gestionale SEAB")
+        st.subheader("🔒 Accesso Riservato - Piattaforma SEAB")
         st.text_input("Password", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        st.subheader("🔒 Accesso Riservato Gestionale SEAB")
+        st.subheader("🔒 Accesso Riservato - Piattaforma SEAB")
         st.text_input("Password", type="password", on_change=password_entered, key="password")
-        st.error("😕 Password errata. Riprova. (Password predefinita: seab2026)")
+        st.error("😕 Password errata. Riprova.")
         return False
     else:
         return True
 
 if not check_password():
     st.stop()
+
+
+# --- AUDIT TRAIL / REGISTRO STORICO ---
+def log_action(action, details):
+    log_file = "audit_log.csv"
+    timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_row = pd.DataFrame([{"Timestamp": timestamp, "Azione": action, "Dettagli": details}])
+    if os.path.exists(log_file):
+        new_row.to_csv(log_file, mode='a', header=False, index=False)
+    else:
+        new_row.to_csv(log_file, mode='w', header=True, index=False)
 
 
 # --- PERCORSI AUTOMATICI RISORSE ---
@@ -431,234 +454,307 @@ def generate_mp_pdf_bytes(data, tecnico_nome, logo_path, firma_path):
 
 
 # ==========================================
-# 3. INTERFACCIA WEB AGGIORNATA E STABILE
+# 3. INTERFACCIA WEB CON NAVIGAZIONE PAGINE
 # ==========================================
-st.title("⚡ Gestionale Cloud - SEAB (Modalità Automatica)")
-st.markdown("Database, logo e firma vengono caricati automaticamente dal server. Cerca i dispositivi e scarica i certificati.")
+st.sidebar.header("⚙️ Configurazione")
+pagina_scelta = st.sidebar.radio("Navigazione", ["📋 Gestione e Download", "📈 Report & Grafici Analitici"])
 
-st.sidebar.header("⚙️ Impostazioni")
-tipo_scheda_scelto = st.sidebar.selectbox("Seleziona Tipo di Scheda", ["VSE (Sicurezza Elettrica - IEC 62353)", "MP (Manutenzione Preventiva)"])
+tipo_scheda_scelto = st.sidebar.selectbox("Seleziona Modulo", ["VSE (Sicurezza Elettrica - IEC 62353)", "MP (Manutenzione Preventiva)"])
 
-# Menù a tendina blindato per i tecnici censiti SEAB
 TECNICI_AUTORIZZATI = ["ALESSANDRO PETRAROLO", "TECNICO SEAB 2", "TECNICO SEAB 3"]
 tecnico_input = st.sidebar.selectbox("Tecnico Responsabile", TECNICI_AUTORIZZATI)
 
-# Caricamento automatico di logo e firma dalla cartella
 logo_path, firma_path = get_resource_path()
-
 if logo_path:
-    st.sidebar.success(f"Logo caricato in automatico ({logo_path})")
+    st.sidebar.success(f"Logo attivo ({logo_path})")
 else:
-    st.sidebar.warning("⚠️ Manca il file `logo.png` o `logo.jpg` nella cartella.")
+    st.sidebar.warning("⚠️ Manca `logo.png`.")
 
 if firma_path:
-    st.sidebar.success(f"Firma caricata in automatico ({firma_path})")
+    st.sidebar.success(f"Firma attiva ({firma_path})")
 else:
-    st.sidebar.warning("⚠️ Manca il file `firma.png` o `firma.jpg` nella cartella.")
+    st.sidebar.warning("⚠️ Manca `firma.png`.")
 
 
-# --- GESTIONE VSE AUTOMATICA ---
-if "VSE" in tipo_scheda_scelto:
-    excel_filename = "database_vse.xlsx"
-    if not os.path.exists(excel_filename):
-        st.error(f"❌ Impossibile trovare il file `{excel_filename}` nella cartella dell'applicazione.")
-        st.info("Metti il file Excel con questo nome esatto nella stessa cartella di `app.py`.")
-        st.stop()
+# ==========================================
+# PAGINA 1: GESTIONE E DOWNLOAD
+# ==========================================
+if pagina_scelta == "📋 Gestione e Download":
+    st.title("🏥 Gestionale Cloud - SEAB Enterprise")
+    st.markdown("Piattaforma unificata per la gestione e generazione automatica dei certificati tecnici.")
 
-    # Lettura forzata a stringa e pulizia degli spazi nelle intestazioni
-    df = pd.read_excel(excel_filename, dtype=str)
-    df.columns = [str(c).strip() for c in df.columns]
-    
-    st.success(f"Database VSE attivo ({len(df)} dispositivi caricati automaticamente).")
+    if "VSE" in tipo_scheda_scelto:
+        excel_filename = "database_vse.xlsx"
+        if not os.path.exists(excel_filename):
+            st.error(f"❌ Impossibile trovare `{excel_filename}` nella cartella.")
+            st.stop()
 
-    # Pannello filtri avanzati
-    st.markdown("### 🔍 Filtri di Ricerca Avanzata")
-    col_f1, col_f2 = st.columns(2)
-    
-    with col_f1:
-        f_reparto = st.text_input("Reparto Rilevato", value="")
-    with col_f2:
-        f_inv = st.text_input("Numero Inventario", value="")
+        df = pd.read_excel(excel_filename, dtype=str)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # --- REPORT APPARATI (KPI DETTAGLIATI) ---
+        st.markdown("### 📊 Report Apparati")
+        tot_disp = len(df)
         
-    filtered_df = df.copy()
-    if f_reparto and "REPARTO RILEVATO" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['REPARTO RILEVATO'].astype(str).str.lower().str.contains(f_reparto.lower(), na=False)]
-    if f_inv and "INV" in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['INV'].astype(str).str.lower().str.contains(f_inv.lower(), na=False)]
+        col_esito = "ESITO VE 2026" if "ESITO VE 2026" in df.columns else None
+        
+        pos_count = len(df[df[col_esito].str.upper() == "POSITIVO"]) if col_esito else 0
+        not_found_count = len(df[df['REPARTO RILEVATO'].str.upper() == "NON TROVATO"]) if "REPARTO RILEVATO" in df.columns else 0
+        
+        riserva_count = 0
+        neg_count = 0
+        if col_esito:
+            riserva_count = len(df[df[col_esito].str.upper().str.contains("RISERVA", na=False)])
+            neg_count = len(df[df[col_esito].str.upper().str.contains("NEGATIVO|KO", na=False)])
 
-    st.write(f"Dispositivi visibili: **{len(filtered_df)}**")
-    
-    # Visualizzazione tabella e pulsante di download diretto in Excel
-    st.dataframe(filtered_df, use_container_width=True)
-    
-    excel_buffer = io.BytesIO()
-    filtered_df.to_excel(excel_buffer, index=False)
-    excel_buffer.seek(0)
-    st.download_button(
-        label="📥 Esporta tabella visibile in Excel (.xlsx)",
-        data=excel_buffer,
-        file_name="Tabella_VSE_Filtrata.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Totali", tot_disp)
+        k2.metric("Positivi", pos_count)
+        k3.metric("Non Trovati", not_found_count)
+        k4.metric("Con Riserva", riserva_count)
+        k5.metric("Negativi", neg_count)
 
-    def get_vse_row_dict(row):
-        def val(col_name, default=""):
-            for c in row.index:
-                if str(c).strip().upper() == str(col_name).strip().upper():
-                    v = row[c]
-                    return v if pd.notnull(v) and str(v).lower() != "nan" else default
-            return default
+        # --- FILTRI DI RICERCA AVANZATI MULTIPLI ---
+        st.markdown("### 🔍 Filtri di Ricerca Avanzata")
+        f_col1, f_col2, f_col3 = st.columns(3)
+        
+        with f_col1:
+            f_reparto = st.text_input("Reparto Rilevato", value="")
+        with f_col2:
+            f_inv = st.text_input("Numero Inventario", value="")
+        with f_col3:
+            f_costruttore = st.text_input("Costruttore / Produttore", value="")
 
-        inv_val = val("INV", "0")
-        if isinstance(inv_val, float): inv_val = int(inv_val)
-        data_ve = val("DATA VE 2026", "")
-        data_str = data_ve.strftime("%d/%m/%Y") if pd.notnull(data_ve) and hasattr(data_ve, "strftime") else str(data_ve)
+        filtered_df = df.copy()
+        if f_reparto and "REPARTO RILEVATO" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['REPARTO RILEVATO'].astype(str).str.lower().str.contains(f_reparto.lower(), na=False)]
+        if f_inv and "INV" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['INV'].astype(str).str.lower().str.contains(f_inv.lower(), na=False)]
+        if f_costruttore and "PRODUTTORE" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['PRODUTTORE'].astype(str).str.lower().str.contains(f_costruttore.lower(), na=False)]
 
-        return {
-            "inv": inv_val, "classe": str(val("CLASSE", "")), "produttore": str(val("PRODUTTORE", "")),
-            "modello": str(val("MODELLO", "")), "sn": str(val("SN", "")), "configurazione": str(val("CONFIGURAZIONE", "")),
-            "app_padre": str(val("APP PADRE", "")), "reparto_collaudo": str(val("REPARTO COLLAUDO", "")),
-            "presidio": str(val("UBICAZIONE", "")), "reparto_rilevato": str(val("REPARTO RILEVATO", "")),
-            "n_scheda": str(val("N SCHEDA VE 2026", "")), "data_ve": data_str, "esito_ve": str(val("ESITO VE 2026", "POSITIVO")),
-            "note_ve": str(val("NOTE VE", "")), "allineamento": str(val("ALLINEAMENTO DOCUMENTAZIONE", "OK")),
-            "fusibili": str(val("CONFORMITÀ FUSIBILI", "N.V.")), "etichette": str(val("STATO ETICHETTE E DATI DI TARGA", "OK")),
-            "integrita": str(val("INTEGRITÀ E CONTAMINAZIONE", "OK")), "accessori": str(val("STATO DEGLI ACCESSORI", "OK")),
-            "config_sistema": str(val("CONFIGURAZIONE SISTEMA", "OK")), "verifica_funzionale": str(val("VERIFICA FUNZIONALE DI SISTEMA", "OK")),
-            "classe_prot": str(val("CLASSE DI PROTEZIONE (I II o alimentazione interna)", "I")), "tipo_parte": str(val("TIPO PARTE APPLICATA (NA, B, BF, CF)", "B")),
-            "tensione": str(val("TENSIONE DI ALIMENTAZIONE DURANTE LA VERIFICA", "228,3 V")), "terra_desc": str(val("RESISTENZA DELLA TERRA DI PROTEZIONE \n(DESCRIZIONE SISTEMA)", "")),
-            "terra_val": str(val("RESISTENZA TERRA DI PROTEZIONE Ω\n(valore)", "N.A.")), "iso_rete_terra": str(val("RETE TERRA DI PROTEZIONE MΩ", "N.A.")),
-            "iso_rete_parti": str(val("RETE PARTI CONDUTTRICI ACCESSIBILI MΩ", "OVER MΩ")), "iso_rete_app_nof": str(val("RETE PARTI APPLICATE (NON TIPO F) MΩ", "OVER MΩ")),
-            "iso_tipof_terra": str(val("PARTI APPLICATE TIPO F TERRA DI PROTEZIONE MΩ", "N.A.")), "iso_tipof_parti": str(val("PARTI APPICATE TIPO F PARTI CONDUTTRICI ACCESSIBILI MΩ", "N.A.")),
-            "corr_sistema": str(val("CORRENTE DI DISPERSIONE NEL SISTEMA µA", "18,6 µA")), "corr_app1": str(val("1 CORRENTE max DSPA µa", "N.A.")),
-            "desc_app1": str(val("DESCRIZIONE PARTI APPLICATE 1", "")), "corr_app2": str(val("2 CORRENTE DSPA µa ", "N.A.")),
-            "desc_app2": str(val("DESCRIZIONE PARTE APPLICATA 2", "")), "corr_app3": str(val("3 CORRENTE DSPA  µa ", "N.A.")),
-            "desc_app3": str(val("DESCRIZIONE PARTE APPLICATA 3", "")), "corr_app4": str(val("4 CORRENTE DSPA µa", "N.A.")),
-            "desc_app4": str(val("DESCRIZIONE PARTE APPLICATA 4", "")), "strumento_sn": str(val("SN STRUMENTO DI MISURA ", "5625031")),
-            "scadenza_taratura": str(val("SCADENZA TARATURA", "14/01/2027"))
-        }
+        st.write(f"Risultati filtrati: **{len(filtered_df)}** dispositivi")
+        st.dataframe(filtered_df, use_container_width=True)
 
-    st.markdown("### 🚀 Download Certificati VSE")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📦 Scarica ZIP VSE Filtrati", type="primary"):
-            with st.spinner("Generazione dei certificati in corso, attendere..."):
-                zip_buffer = io.BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # Esportazione Excel
+        excel_buffer = io.BytesIO()
+        filtered_df.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+        st.download_button("📥 Esporta tabella filtrata in formato Excel (.xlsx)", data=excel_buffer, file_name="Tabella_VSE_Filtrata.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        def get_vse_row_dict(row):
+            def val(col_name, default=""):
+                for c in row.index:
+                    if str(c).strip().upper() == str(col_name).strip().upper():
+                        v = row[c]
+                        return v if pd.notnull(v) and str(v).lower() != "nan" else default
+                return default
+
+            inv_val = val("INV", "0")
+            if isinstance(inv_val, float): inv_val = int(inv_val)
+            data_ve = val("DATA VE 2026", "")
+            data_str = data_ve.strftime("%d/%m/%Y") if pd.notnull(data_ve) and hasattr(data_ve, "strftime") else str(data_ve)
+
+            return {
+                "inv": inv_val, "classe": str(val("CLASSE", "")), "produttore": str(val("PRODUTTORE", "")),
+                "modello": str(val("MODELLO", "")), "sn": str(val("SN", "")), "configurazione": str(val("CONFIGURAZIONE", "")),
+                "app_padre": str(val("APP PADRE", "")), "reparto_collaudo": str(val("REPARTO COLLAUDO", "")),
+                "presidio": str(val("UBICAZIONE", "")), "reparto_rilevato": str(val("REPARTO RILEVATO", "")),
+                "n_scheda": str(val("N SCHEDA VE 2026", "")), "data_ve": data_str, "esito_ve": str(val("ESITO VE 2026", "POSITIVO")),
+                "note_ve": str(val("NOTE VE", "")), "allineamento": str(val("ALLINEAMENTO DOCUMENTAZIONE", "OK")),
+                "fusibili": str(val("CONFORMITÀ FUSIBILI", "N.V.")), "etichette": str(val("STATO ETICHETTE E DATI DI TARGA", "OK")),
+                "integrita": str(val("INTEGRITÀ E CONTAMINAZIONE", "OK")), "accessori": str(val("STATO DEGLI ACCESSORI", "OK")),
+                "config_sistema": str(val("CONFIGURAZIONE SISTEMA", "OK")), "verifica_funzionale": str(val("VERIFICA FUNZIONALE DI SISTEMA", "OK")),
+                "classe_prot": str(val("CLASSE DI PROTEZIONE (I II o alimentazione interna)", "I")), "tipo_parte": str(val("TIPO PARTE APPLICATA (NA, B, BF, CF)", "B")),
+                "tensione": str(val("TENSIONE DI ALIMENTAZIONE DURANTE LA VERIFICA", "228,3 V")), "terra_desc": str(val("RESISTENZA DELLA TERRA DI PROTEZIONE \n(DESCRIZIONE SISTEMA)", "")),
+                "terra_val": str(val("RESISTENZA TERRA DI PROTEZIONE Ω\n(valore)", "N.A.")), "iso_rete_terra": str(val("RETE TERRA DI PROTEZIONE MΩ", "N.A.")),
+                "iso_rete_parti": str(val("RETE PARTI CONDUTTRICI ACCESSIBILI MΩ", "OVER MΩ")), "iso_rete_app_nof": str(val("RETE PARTI APPLICATE (NON TIPO F) MΩ", "OVER MΩ")),
+                "iso_tipof_terra": str(val("PARTI APPLICATE TIPO F TERRA DI PROTEZIONE MΩ", "N.A.")), "iso_tipof_parti": str(val("PARTI APPICATE TIPO F PARTI CONDUTTRICI ACCESSIBILI MΩ", "N.A.")),
+                "corr_sistema": str(val("CORRENTE DI DISPERSIONE NEL SISTEMA µA", "18,6 µA")),
+                "corr_app1": str(val("1 CORRENTE max DSPA µa", "N.A.")), "desc_app1": str(val("DESCRIZIONE PARTI APPLICATE 1", "")),
+                "corr_app2": str(val("2 CORRENTE DSPA µa ", "N.A.")), "desc_app2": str(val("DESCRIZIONE PARTE APPLICATA 2", "")),
+                "corr_app3": str(val("3 CORRENTE DSPA  µa ", "N.A.")), "desc_app3": str(val("DESCRIZIONE PARTE APPLICATA 3", "")),
+                "corr_app4": str(val("4 CORRENTE DSPA µa", "N.A.")), "desc_app4": str(val("DESCRIZIONE PARTE APPLICATA 4", "")),
+                "strumento_sn": str(val("SN STRUMENTO DI MISURA ", "5625031")), "scadenza_taratura": str(val("SCADENZA TARATURA", "14/01/2027"))
+            }
+
+        # Anteprima PDF
+        st.markdown("### 👁️ Anteprima e Download Singolo Certificato VSE")
+        inv_preview = st.text_input("Inserisci Numero Inventario Esatto", value="")
+        if st.button("Genera e Visualizza Anteprima PDF"):
+            match_row = filtered_df[filtered_df['INV'].astype(str) == inv_preview.strip()]
+            if not match_row.empty:
+                d = get_vse_row_dict(match_row.iloc[0])
+                pdf_bytes = generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)
+                st.success("Certificato generato con successo!")
+                st.download_button(
+                    label="📄 Scarica Anteprima PDF di questo dispositivo",
+                    data=pdf_bytes,
+                    file_name=f"Certificato_VSE_{d['inv']}.pdf",
+                    mime="application/pdf"
+                )
+            else:
+                st.warning("Inventario non trovato tra quelli filtrati.")
+
+        # Download Massivo
+        st.markdown("### 🚀 Generazione Documentazione Massiva")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📦 Scarica Archivio ZIP (Filtro Attivo)", type="primary"):
+                with st.spinner("Generazione dell'archivio ZIP in corso..."):
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        for idx, row in filtered_df.iterrows():
+                            d = get_vse_row_dict(row)
+                            pdf_bytes = generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)
+                            zip_file.writestr(f"Certificato_VSE_{d['inv']}.pdf", pdf_bytes)
+                    zip_buffer.seek(0)
+                    log_action("ZIP VSE", f"Scaricati {len(filtered_df)} certificati da {tecnico_input}")
+                st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Certificati_VSE.zip", mime="application/zip")
+
+        with col2:
+            if PdfMerger is not None and st.button("📚 Genera Documento PDF Cumulativo"):
+                with st.spinner("Unione dei PDF in corso..."):
+                    merger = PdfMerger()
                     for idx, row in filtered_df.iterrows():
                         d = get_vse_row_dict(row)
-                        pdf_bytes = generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)
-                        zip_file.writestr(f"Certificato_VSE_{d['inv']}.pdf", pdf_bytes)
+                        merger.append(io.BytesIO(generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)))
+                    cum_buffer = io.BytesIO()
+                    merger.write(cum_buffer)
+                    merger.close()
+                    cum_buffer.seek(0)
+                    log_action("PDF Cumulativo VSE", f"Uniti {len(filtered_df)} certificati da {tecnico_input}")
+                st.download_button("📥 Clicca qui per scaricare il PDF Cumulativo", data=cum_buffer, file_name="_CUMULATIVO_VSE.pdf", mime="application/pdf")
+
+    else: 
+        # Modulo MP
+        excel_filename = "database_mp.xlsx"
+        if not os.path.exists(excel_filename):
+            st.error(f"❌ Impossibile trovare `{excel_filename}` nella cartella.")
+            st.stop()
+
+        df_raw = pd.read_excel(excel_filename, header=None, dtype=str)
+        row0, row1, row2 = df_raw.iloc[0].values, df_raw.iloc[1].values, df_raw.iloc[2].values
+        col_map = {}
+        for idx, val in enumerate(row0):
+            val_str = str(val).strip().upper()
+            if val_str and val_str != 'NAN': col_map[val_str] = idx
+
+        card_types = {}
+        for col_idx in range(21, len(row0)):
+            c_code, c_title, c_desc = str(row0[col_idx]).strip(), str(row1[col_idx]).strip(), str(row2[col_idx]).strip()
+            if c_code in ['TECNICO', 'ISTRUZIONI STAMPA', 'PDTA', 'NAN', 'N CONTROLLO'] or not c_code or c_code.lower() == 'nan':
+                continue
+            match = re.match(r'([A-Z]+)', c_code)
+            if match:
+                t_letter = match.group(1)
+                if t_letter not in card_types:
+                    card_types[t_letter] = {'title': c_title if c_title and c_title.lower() != 'nan' else f"Scheda Tipo {t_letter}", 'items': []}
+                card_types[t_letter]['items'].append((c_code, col_idx, c_desc))
+
+        st.markdown("### 📊 Report Apparati - Manutenzione Preventiva")
+        df_data = df_raw.iloc[3:].copy()
+        m1, m2 = st.columns(2)
+        m1.metric("Tipi Scheda Mappati", len(card_types))
+        m2.metric("Schede Totali in Database", len(df_data))
+
+        st.markdown("### 🔍 Filtri di Ricerca Avanzata MP")
+        f_mp1, f_mp2 = st.columns(2)
+        with f_mp1:
+            f_rep_mp = st.text_input("Reparto Rilevato 2026", value="")
+        with f_mp2:
+            f_inv_mp = st.text_input("Inventario", value="")
+
+        if f_rep_mp:
+            col_rep = col_map.get("REPARTO RILEVATO 2026")
+            if col_rep is not None:
+                df_data = df_data[df_data.iloc[:, col_rep].astype(str).str.lower().str.contains(f_rep_mp.lower(), na=False)]
+        if f_inv_mp:
+            col_inv = col_map.get("INV")
+            if col_inv is not None:
+                df_data = df_data[df_data.iloc[:, col_inv].astype(str).str.lower().str.contains(f_inv_mp.lower(), na=False)]
+
+        st.write(f"Schede MP visibili: **{len(df_data)}**")
+
+        def extract_mp_row_dict(row):
+            def get_val(r, col_name, default=""):
+                c_idx = col_map.get(col_name)
+                if c_idx is not None:
+                    val = r.iloc[c_idx] if hasattr(r, 'iloc') else r[c_idx]
+                    return val if pd.notnull(val) else default
+                return default
+
+            inv_val = get_val(row, "INV", "0")
+            if isinstance(inv_val, float): inv_val = int(inv_val)
+            n_scheda_val = get_val(row, "N SCHEDA MP 2026", "")
+            if isinstance(n_scheda_val, float): n_scheda_val = int(n_scheda_val)
+            data_val = get_val(row, "DATA MP 2026", "")
+            data_str = data_val.strftime("%d/%m/%Y") if pd.notnull(data_val) and hasattr(data_val, "strftime") else str(data_val if pd.notnull(data_val) else "")
+
+            tipo_val = str(get_val(row, "TIPO DI SCHEDA", "A")).strip().upper()
+            actual_type = tipo_val if tipo_val in card_types else "A"
+            t_info = card_types[actual_type]
+
+            ispezioni, verifiche = [], []
+            for c_code, c_idx, c_desc in t_info['items']:
+                raw_val = row.iloc[c_idx] if hasattr(row, 'iloc') else row[c_idx]
+                val_clean = str(raw_val).strip().upper() if pd.notnull(raw_val) and str(raw_val).lower() != "nan" else "OK"
+                if classify_mp_item(c_desc) == "ISPEZIONE":
+                    ispezioni.append((c_code, c_desc, val_clean))
+                else:
+                    verifiche.append((c_code, c_desc, val_clean))
+
+            return {
+                "tipo_scheda": actual_type, "titolo_scheda": t_info['title'], "n_scheda": n_scheda_val,
+                "data": data_str, "descrizione": str(get_val(row, "CLASSE", t_info['title'])), "inv": inv_val,
+                "costruttore": str(get_val(row, "PRODUTTORE", "")), "sn": str(get_val(row, "SN", "")),
+                "modello": str(get_val(row, "MODELLO", "")), "configurazione": str(get_val(row, "CONFIGURAZIONE RILEVATA", get_val(row, "CONFIGURAZIONE", ""))),
+                "inv_padre": str(get_val(row, "APP PADRE RILEVATA", get_val(row, "APP \nPADRE", ""))), "reparto": str(get_val(row, "REPARTO 2025", "")),
+                "presidio": str(get_val(row, "UBICAZIONE", "")), "reparto_rilevato": str(get_val(row, "REPARTO RILEVATO 2026", "")),
+                "ispezioni": ispezioni, "verifiche": verifiche, "note": str(get_val(row, "NOTE MP", "")), "esito": "POSITIVO"
+            }
+
+        st.markdown("### 🚀 Generazione Schede MP")
+        if st.button("📦 Scarica Archivio ZIP Schede MP (Filtro Attivo)", type="primary"):
+            with st.spinner("Generazione delle schede MP in corso..."):
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for idx, row in df_data.iterrows():
+                        d = extract_mp_row_dict(row)
+                        pdf_bytes = generate_mp_pdf_bytes(d, tecnico_input, logo_path, firma_path)
+                        zip_file.writestr(f"Scheda_MP_{d['n_scheda']}_{d['inv']}.pdf", pdf_bytes)
                 zip_buffer.seek(0)
-            st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Certificati_VSE.zip", mime="application/zip")
+                log_action("ZIP MP", f"Scaricati {len(df_data)} file MP da {tecnico_input}")
+            st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Schede_MP_Selezionate.zip", mime="application/zip")
 
-    with col2:
-        if PdfMerger is not None and st.button("📚 Genera PDF Cumulativo VSE"):
-            with st.spinner("Unione dei PDF in corso, attendere..."):
-                merger = PdfMerger()
-                for idx, row in filtered_df.iterrows():
-                    d = get_vse_row_dict(row)
-                    merger.append(io.BytesIO(generate_vse_pdf_bytes(d, tecnico_input, logo_path, firma_path)))
-                cum_buffer = io.BytesIO()
-                merger.write(cum_buffer)
-                merger.close()
-                cum_buffer.seek(0)
-            st.download_button("📥 Clicca qui per scaricare il PDF Cumulativo", data=cum_buffer, file_name="_CUMULATIVO_VSE.pdf", mime="application/pdf")
 
-# --- GESTIONE MP AUTOMATICA ---
-else: 
-    excel_filename = "database_mp.xlsx"
-    if not os.path.exists(excel_filename):
-        st.error(f"❌ Impossibile trovare il file `{excel_filename}` nella cartella dell'applicazione.")
-        st.info("Metti il file Excel con questo nome esatto nella stessa cartella di `app.py`.")
-        st.stop()
+# ==========================================
+# PAGINA 2: REPORT & GRAFICI ANALITICI
+# ==========================================
+elif pagina_scelta == "📈 Report & Grafici Analitici":
+    st.title("📈 Report & Grafici Analitici - SEAB")
+    st.markdown("Analisi visiva e statistica dello stato dei dispositivi tecnici.")
 
-    df_raw = pd.read_excel(excel_filename, header=None, dtype=str)
-    row0, row1, row2 = df_raw.iloc[0].values, df_raw.iloc[1].values, df_raw.iloc[2].values
-    col_map = {}
-    for idx, val in enumerate(row0):
-        val_str = str(val).strip().upper()
-        if val_str and val_str != 'NAN': col_map[val_str] = idx
+    if "VSE" in tipo_scheda_scelto:
+        excel_filename = "database_vse.xlsx"
+        if os.path.exists(excel_filename):
+            df = pd.read_excel(excel_filename, dtype=str)
+            df.columns = [str(c).strip() for c in df.columns]
 
-    card_types = {}
-    for col_idx in range(21, len(row0)):
-        c_code, c_title, c_desc = str(row0[col_idx]).strip(), str(row1[col_idx]).strip(), str(row2[col_idx]).strip()
-        if c_code in ['TECNICO', 'ISTRUZIONI STAMPA', 'PDTA', 'NAN', 'N CONTROLLO'] or not c_code or c_code.lower() == 'nan':
-            continue
-        match = re.match(r'([A-Z]+)', c_code)
-        if match:
-            t_letter = match.group(1)
-            if t_letter not in card_types:
-                card_types[t_letter] = {'title': c_title if c_title and c_title.lower() != 'nan' else f"Scheda Tipo {t_letter}", 'items': []}
-            card_types[t_letter]['items'].append((c_code, col_idx, c_desc))
-
-    st.success(f"Database MP attivo ({len(card_types)} tipi di schede caricate automaticamente).")
-    df_data = df_raw.iloc[3:].copy()
-
-    # Pannello filtri avanzati MP
-    st.markdown("### 🔍 Filtri di Ricerca Avanzata MP")
-    col_mp1, col_mp2 = st.columns(2)
-    with col_mp1:
-        f_rep_mp = st.text_input("Reparto Rilevato 2026", value="")
-    with col_mp2:
-        f_inv_mp = st.text_input("Inventario", value="")
-
-    if f_rep_mp:
-        col_rep = col_map.get("REPARTO RILEVATO 2026")
-        if col_rep is not None:
-            df_data = df_data[df_data.iloc[:, col_rep].astype(str).str.lower().str.contains(f_rep_mp.lower(), na=False)]
-    if f_inv_mp:
-        col_inv = col_map.get("INV")
-        if col_inv is not None:
-            df_data = df_data[df_data.iloc[:, col_inv].astype(str).str.lower().str.contains(f_inv_mp.lower(), na=False)]
-
-    st.write(f"Schede MP visibili: **{len(df_data)}**")
-
-    def extract_mp_row_dict(row):
-        def get_val(r, col_name, default=""):
-            c_idx = col_map.get(col_name)
-            if c_idx is not None:
-                val = r.iloc[c_idx] if hasattr(r, 'iloc') else r[c_idx]
-                return val if pd.notnull(val) else default
-            return default
-
-        inv_val = get_val(row, "INV", "0")
-        if isinstance(inv_val, float): inv_val = int(inv_val)
-        n_scheda_val = get_val(row, "N SCHEDA MP 2026", "")
-        if isinstance(n_scheda_val, float): n_scheda_val = int(n_scheda_val)
-        data_val = get_val(row, "DATA MP 2026", "")
-        data_str = data_val.strftime("%d/%m/%Y") if pd.notnull(data_val) and hasattr(data_val, "strftime") else str(data_val if pd.notnull(data_val) else "")
-
-        tipo_val = str(get_val(row, "TIPO DI SCHEDA", "A")).strip().upper()
-        actual_type = tipo_val if tipo_val in card_types else "A"
-        t_info = card_types[actual_type]
-
-        ispezioni, verifiche = [], []
-        for c_code, c_idx, c_desc in t_info['items']:
-            raw_val = row.iloc[c_idx] if hasattr(row, 'iloc') else row[c_idx]
-            val_clean = str(raw_val).strip().upper() if pd.notnull(raw_val) and str(raw_val).lower() != "nan" else "OK"
-            if classify_mp_item(c_desc) == "ISPEZIONE":
-                ispezioni.append((c_code, c_desc, val_clean))
+            col_esito = "ESITO VE 2026" if "ESITO VE 2026" in df.columns else None
+            
+            st.subheader("Distribuzione Esiti Verifiche VSE")
+            if col_esito:
+                esiti_counts = df[col_esito].value_counts()
+                st.bar_chart(esiti_counts)
             else:
-                verifiche.append((c_code, c_desc, val_clean))
+                st.info("Colonna esito non trovata per i grafici.")
 
-        return {
-            "tipo_scheda": actual_type, "titolo_scheda": t_info['title'], "n_scheda": n_scheda_val,
-            "data": data_str, "descrizione": str(get_val(row, "CLASSE", t_info['title'])), "inv": inv_val,
-            "costruttore": str(get_val(row, "PRODUTTORE", "")), "sn": str(get_val(row, "SN", "")),
-            "modello": str(get_val(row, "MODELLO", "")), "configurazione": str(get_val(row, "CONFIGURAZIONE RILEVATA", get_val(row, "CONFIGURAZIONE", ""))),
-            "inv_padre": str(get_val(row, "APP PADRE RILEVATA", get_val(row, "APP \nPADRE", ""))), "reparto": str(get_val(row, "REPARTO 2025", "")),
-            "presidio": str(get_val(row, "UBICAZIONE", "")), "reparto_rilevato": str(get_val(row, "REPARTO RILEVATO 2026", "")),
-            "ispezioni": ispezioni, "verifiche": verifiche, "note": str(get_val(row, "NOTE MP", "")), "esito": "POSITIVO"
-        }
-
-    st.markdown("### 🚀 Download Schede MP")
-    if st.button("📦 Scarica ZIP Schede MP Filtrate", type="primary"):
-        with st.spinner("Generazione delle schede MP in corso, attendere..."):
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for idx, row in df_data.iterrows():
-                    d = extract_mp_row_dict(row)
-                    pdf_bytes = generate_mp_pdf_bytes(d, tecnico_input, logo_path, firma_path)
-                    zip_file.writestr(f"Scheda_MP_{d['n_scheda']}_{d['inv']}.pdf", pdf_bytes)
-            zip_buffer.seek(0)
-        st.download_button("📥 Clicca qui per scaricare il file .ZIP", data=zip_buffer, file_name="Schede_MP_Selezionate.zip", mime="application/zip")
+            if "REPARTO RILEVATO" in df.columns:
+                st.subheader("Dispositivi per Reparto Rilevato (Top 10)")
+                reparti_counts = df["REPARTO RILEVATO"].value_counts().head(10)
+                st.bar_chart(reparti_counts)
+        else:
+            st.warning("Database VSE non trovato per generare i grafici.")
+    else:
+        st.info("Grafici analitici dedicati al modulo Manutenzione Preventiva in fase di popolamento.")
